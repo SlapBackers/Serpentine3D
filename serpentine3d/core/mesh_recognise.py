@@ -43,6 +43,12 @@ _COPLANAR_DEG = 0.5
 # similar length, is inside an arc rather than at a corner.
 _SMOOTH_TURN_DEG = 25.0
 _SIMILAR_CHORDS = 2.5
+# The flat-regions pass only goes ahead when groups of at least this many
+# coplanar triangles cover most of the part, and the solid would not have
+# an unworkable number of faces.
+_FLAT_GROUP = 3
+_MOST_CURVED = 0.5
+_MAX_FACES = 20000
 # Fewest points that make a whole loop a circle rather than a polygon: a
 # hexagon is a nut and an octagon is drawn on purpose, not a hole. Every
 # export of a round hole worth editing has more sides than this.
@@ -90,6 +96,75 @@ def recognise(mesh: MeshShape, tolerance: float | None = None) -> Recognised:
                               len(prepared.tris))
     shape = _flat_regions(prepared, tolerance)
     return Recognised(shape, "faces", _face_count(shape), len(prepared.tris))
+
+
+def convert_pieces(mesh: MeshShape, name: str, echo=None) -> list:
+    """[(name, shape)] for each separate piece of the mesh: a solid where
+    one was recognised, the piece itself, still a mesh, where not.
+
+    Shared by meshtobrep and the plugin, so both say the same things.
+    A lone piece keeps the mesh's name; several are numbered."""
+    say = echo or (lambda _text: None)
+    pieces = split_pieces(mesh)
+    if len(pieces) > 1:
+        say(f"{name}: {len(pieces)} separate parts.")
+    out = []
+    for k, piece in enumerate(pieces, 1):
+        label = name if len(pieces) == 1 else f"{name} {k}"
+        try:
+            found = recognise(piece)
+        except RecogniseError as exc:
+            say(f"{label}: left as a mesh, {exc}.")
+            out.append((label, piece))
+            continue
+        what = ("a straight extrusion" if found.kind == "extrusion"
+                else "flat faces")
+        say(f"{label}: {found.triangles:,} triangles became "
+            f"{found.faces:,} faces ({what}).")
+        out.append((label, found.shape))
+    return out
+
+
+# --- separate parts ---------------------------------------------------------
+
+def split_pieces(mesh: MeshShape) -> list:
+    """The mesh's separate pieces, largest first: Rhino's SplitDisjointMesh.
+
+    An STL has no notion of parts, but a file exported from an assembly is
+    several closed pieces that never touch. Each is found as the triangles
+    that reach one another through shared corners."""
+    points, canonical = _weld(np.asarray(mesh.vertices, np.float64))
+    tris = canonical[np.asarray(mesh.triangles, np.int64)]
+    if not len(tris):
+        return [mesh]
+    # Every corner takes the smallest label among the triangles it is in,
+    # then labels are chased to their root; repeated until nothing moves.
+    label = np.arange(len(points))
+    while True:
+        lowest = label[tris].min(axis=1)
+        moved = label.copy()
+        np.minimum.at(moved, tris.ravel(), np.repeat(lowest, 3))
+        while True:
+            chased = moved[moved]
+            if np.array_equal(chased, moved):
+                break
+            moved = chased
+        if np.array_equal(moved, label):
+            break
+        label = moved
+    owner = label[tris[:, 0]]
+    roots, piece_of, sizes = np.unique(owner, return_inverse=True,
+                                       return_counts=True)
+    if len(roots) == 1:
+        return [mesh]
+    piece_of = np.asarray(piece_of).ravel()
+    pieces = []
+    for k in np.argsort(-sizes, kind="stable"):
+        own = tris[piece_of == k]
+        used, local = np.unique(own, return_inverse=True)
+        pieces.append(MeshShape(points[used],
+                                np.asarray(local).reshape(-1, 3)))
+    return pieces
 
 
 # --- the mesh, welded and measured ------------------------------------------
@@ -481,6 +556,7 @@ def _build_extrusion(frame, profile, fitted, height):
 def _flat_regions(m: _Prepared, tolerance: float):
     """Each run of coplanar neighbours as one face, the rest as triangles."""
     region = _coplanar_groups(m, tolerance)
+    _worth_rebuilding(region)
     faces = []
     loose = []
     for label in np.unique(region):
@@ -507,6 +583,24 @@ def _flat_regions(m: _Prepared, tolerance: float):
     if checked is None:
         raise RecogniseError("the rebuilt solid does not match the mesh")
     return checked
+
+
+def _worth_rebuilding(region: np.ndarray):
+    """Refuse, before any kernel work, a part that is mostly curved.
+
+    A curved surface is meshed in strips of flat four-sided patches, two
+    triangles each, which merge into faces that help nobody edit it: a
+    rendering model of a glass would come back as a hundred thousand faces
+    after minutes of sewing. A flat face worth having spans more than one
+    patch, so only groups of three or more count, and they have to make up
+    most of the part."""
+    _, sizes = np.unique(region, return_counts=True)
+    flat = sizes[sizes >= _FLAT_GROUP].sum()
+    loose = len(region) - flat
+    faces = int((sizes >= _FLAT_GROUP).sum()) + int(loose)
+    if loose > len(region) * _MOST_CURVED or faces > _MAX_FACES:
+        raise RecogniseError("too little of it is flat to be worth "
+                             "rebuilding")
 
 
 def _coplanar_groups(m: _Prepared, tolerance: float) -> np.ndarray:

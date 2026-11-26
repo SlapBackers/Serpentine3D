@@ -108,14 +108,49 @@ def test_a_mesh_with_nothing_flat_is_left_to_the_facets():
         recognise(_tetrahedron())
 
 
-def test_a_curved_part_still_merges_what_is_flat(tmp_path):
-    # the kernel meshes a sphere in flat four-sided patches, two triangles
-    # each; those come back as one face apiece, the rest stays curved
+def test_a_curved_part_is_not_worth_rebuilding(tmp_path):
+    # a sphere is meshed in flat four-sided patches of two triangles; merging
+    # those would make a solid of thousands of faces nobody can edit
     mesh = _as_stl(g.make_sphere((0, 0, 0), 10), tmp_path)
-    found = recognise(mesh)
-    assert found.kind == "faces"
-    assert found.faces < found.triangles
-    assert g.shape_kind(found.shape) == "solid"
+    with pytest.raises(RecogniseError, match="too little of it is flat"):
+        recognise(mesh)
+
+
+def _two_plates(tmp_path):
+    a = _as_stl(_plate_with_holes(), tmp_path, "a")
+    b = _as_stl(g.translate(_plate_with_holes(), (0, 100, 0)), tmp_path, "b")
+    from serpentine3d.core.mesh import merge
+    return merge([a, b])
+
+
+def test_separate_pieces_are_found(tmp_path):
+    from serpentine3d.core.mesh_recognise import split_pieces
+    both = _two_plates(tmp_path)
+    pieces = split_pieces(both)
+    assert len(pieces) == 2
+    assert sum(len(p.triangles) for p in pieces) == len(both.triangles)
+    assert split_pieces(pieces[0]) == [pieces[0]]
+
+
+def test_meshtobrep_makes_one_solid_per_piece(tmp_path):
+    doc = Document()
+    doc.add(_two_plates(tmp_path), name="Parts")
+    said = doc.run("meshtobrep", ["Parts", ""])
+    assert doc.get("Parts") is None
+    for name in ("Parts 1", "Parts 2"):
+        obj = doc.get(name)
+        assert obj.kind == "solid"
+        assert len(g.faces_of(obj.shape)) == 8
+    assert any("2 separate parts" in s for s in said)
+
+
+def test_splitdisjointmesh_leaves_meshes(tmp_path):
+    doc = Document()
+    doc.add(_two_plates(tmp_path), name="Parts")
+    doc.run("splitdisjointmesh", ["Parts", ""])
+    assert doc.get("Parts") is None
+    assert doc.get("Parts 1").kind == "mesh"
+    assert doc.get("Parts 2").kind == "mesh"
 
 
 def test_an_open_mesh_is_refused():
@@ -135,13 +170,12 @@ def test_meshtobrep_says_what_it_found(tmp_path):
     assert any("became 8 faces (a straight extrusion)" in s for s in said)
 
 
-def test_meshtobrep_keeps_the_facets_when_nothing_matches():
+def test_meshtobrep_leaves_a_mesh_when_nothing_matches():
     doc = Document()
     doc.add(_tetrahedron(), name="Tetra")
     said = doc.run("meshtobrep", ["Tetra", ""])
-    assert any("kept as triangles" in s for s in said)
-    assert doc.get("Tetra").kind in ("surface", "solid")
-    assert len(g.faces_of(doc.get("Tetra").shape)) == 4
+    assert any("Tetra: left as a mesh" in s for s in said)
+    assert doc.get("Tetra").kind == "mesh"
 
 
 def test_method_faceted_still_gives_one_face_per_triangle(tmp_path):

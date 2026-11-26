@@ -236,6 +236,7 @@ Commands that need a file open a filtered chooser by default. Append
 | `sendbackward` (`sendbackwards`) | Nudge the selected objects one step towards the back. |
 | `sendtoback` (`sb`) | Draw the selected objects behind overlapping ones. |
 | `setusertext` (`setattributeusertext`) | Set a key of user text on the selected objects, as Rhino's SetUserText does. |
+| `splitdisjointmesh` | Split meshes into their separate pieces, one object each. |
 | `ungroup` | Ungroup objects and keep them selected. |
 | `unlockall` (`unlock`) | Unlock every locked object and every locked sheet item. |
 | `what` | Report details of the selected objects. |

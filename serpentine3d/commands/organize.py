@@ -266,36 +266,65 @@ def cmd_pointcloud(ctx):
 def cmd_meshtobrep(ctx):
     """Convert closed meshes into solids with their flat faces and holes.
 
-    A straight extrusion comes back as its outline extruded, holes as true
-    cylinders; otherwise coplanar triangles merge into single faces. A mesh
-    that cannot be matched keeps one face per triangle, as Method=Faceted
-    always does."""
+    Separate pieces of one mesh become separate objects first. A straight
+    extrusion comes back as its outline extruded, holes as true cylinders;
+    otherwise coplanar triangles merge into single faces. A piece with too
+    little to find stays a mesh. Method=Faceted converts triangle by
+    triangle instead, as this command always used to."""
     objs = yield SelectReq("Select meshes to convert", kinds=("mesh",),
                            choices={"Method": ["Recognise", "Faceted"]})
     from ..core.mesh import brep_from_mesh
-    from ..core.mesh_recognise import RecogniseError, recognise
-    recognising = ctx.opt("Method", "Recognise") == "Recognise"
-    done = 0
-    for o in objs:
-        if recognising:
+    if ctx.opt("Method", "Recognise") == "Faceted":
+        done = 0
+        for o in objs:
             try:
-                found = recognise(o.shape)
-            except RecogniseError as exc:
-                ctx.echo(f"{o.name}: kept as triangles, {exc}.")
-            else:
-                ctx.scene.replace_shape(o.id, found.shape)
-                what = ("a straight extrusion" if found.kind == "extrusion"
-                        else "flat faces")
-                ctx.echo(f"{o.name}: {found.triangles:,} triangles became "
-                         f"{found.faces:,} faces ({what}).")
+                ctx.scene.replace_shape(o.id, brep_from_mesh(o.shape))
                 done += 1
-                continue
-        try:
-            ctx.scene.replace_shape(o.id, brep_from_mesh(o.shape))
-            done += 1
-        except g.GeometryError as exc:
-            ctx.echo(f"{o.name}: {exc}")
-    ctx.echo(f"Converted {done} mesh(es) to BREP.")
+            except g.GeometryError as exc:
+                ctx.echo(f"{o.name}: {exc}")
+        ctx.echo(f"Converted {done} mesh(es) to BREP.")
+        return
+    from ..core.mesh import MeshShape
+    from ..core.mesh_recognise import convert_pieces
+    solids = meshes = 0
+    for o in objs:
+        results = convert_pieces(o.shape, o.name, ctx.echo)
+        if len(results) == 1:
+            ctx.scene.replace_shape(o.id, results[0][1])
+        else:
+            with ctx.scene.batched():
+                for name, shape in results:
+                    ctx.scene.add(shape, name=name, layer_id=o.layer_id)
+                ctx.scene.remove(o.id)
+        for _name, shape in results:
+            if isinstance(shape, MeshShape):
+                meshes += 1
+            else:
+                solids += 1
+    ctx.echo(f"{solids} solid(s) made"
+             + (f", {meshes} part(s) left as meshes." if meshes else "."))
+
+
+@command("splitdisjointmesh")
+def cmd_splitdisjointmesh(ctx):
+    """Split meshes into their separate pieces, one object each."""
+    objs = yield SelectReq("Select meshes to split", kinds=("mesh",))
+    from ..core.mesh_recognise import split_pieces
+    made = 0
+    for o in objs:
+        pieces = split_pieces(o.shape)
+        if len(pieces) == 1:
+            ctx.echo(f"{o.name} is already one piece.")
+            continue
+        with ctx.scene.batched():
+            for k, piece in enumerate(pieces, 1):
+                ctx.scene.add(piece, name=f"{o.name} {k}",
+                              layer_id=o.layer_id)
+            ctx.scene.remove(o.id)
+        made += len(pieces)
+        ctx.echo(f"{o.name}: split into {len(pieces)} pieces.")
+    if made:
+        ctx.echo(f"Made {made} mesh(es).")
 
 
 @command("breptomesh", aliases=("meshify",))
