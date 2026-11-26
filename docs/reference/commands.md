@@ -213,6 +213,7 @@ Commands that need a file open a filtered chooser by default. Append
 
 | Command | Does |
 |---|---|
+| `attach` | Attach an object to a face, so it follows when the face moves. |
 | `audit` | Check every object's geometry for validity. |
 | `block` | Turn a selection into a reusable block definition + one instance. |
 | `blocklist` (`blockmanager`) | Blocklist |
@@ -221,6 +222,7 @@ Commands that need a file open a filtered chooser by default. Append
 | `bringtofront` (`bf`) | Draw the selected objects on top of overlapping ones. |
 | `changelayer` (`tolayer`) | Move objects to a layer by name (created if missing). |
 | `count` | Count objects: totals by block, kind and layer (for takeoffs). |
+| `detach` | Take away the attachment of the selected objects. |
 | `getusertext` | Report the user text on the selected objects, as Rhino's GetUserText does: one key's value, or with Enter every key. |
 | `group` | Group objects and keep them selected. |
 | `insert` | Insert |

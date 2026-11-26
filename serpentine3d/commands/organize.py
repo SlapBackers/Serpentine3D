@@ -597,3 +597,72 @@ def cmd_audit(ctx):
     else:
         ctx.echo(f"All {len(ctx.scene.all())} object(s) are valid.")
     yield from ()
+
+
+@command("attach")
+def cmd_attach(ctx):
+    """Attach an object to a face, so it follows when the face moves.
+
+    Ctrl+Shift-click the face it sits on first (a cube's top). Then pick
+    the object, the point it is measured from (a corner, an edge, any
+    point; Enter for the face's centre), and how it keeps its place
+    sideways: the same distance from that point, or the same share of the
+    face. Up and down it rides the face. A link follows its own face only,
+    unless asked to follow a chain too. detach takes a link away."""
+    from ..core import attachments as at
+    from .base import PointReq
+    faces = [(oid, i) for oid, kind, i in ctx.selection.subobjects
+             if kind == "face"]
+    if len(faces) != 1:
+        ctx.echo("Ctrl+Shift-click the one face the object sits on first, "
+                 "then run attach.")
+        return
+    parent_id, index = faces[0]
+    parent = ctx.scene.get(parent_id)
+    if parent is None:
+        return
+    face = g.faces_of(parent.shape)[index]
+    picked = yield SelectReq("Select the object to attach to that face",
+                             max_count=1, allow_preselected=False)
+    follower = picked[0]
+    anchor = yield PointReq("Point it is measured from (Enter for the "
+                            "face's centre)", allow_empty=True,
+                            extra_options=("Centre",))
+    if anchor in (None, "Centre"):
+        anchor, where = None, "the face's centre"
+    else:
+        where = "the picked point"
+    mode = yield OptionReq("Sideways, it keeps its",
+                           options=["Distance", "Proportion"],
+                           default="Distance")
+    chain = yield OptionReq("Also follow when that face is moved by an "
+                            "attachment of its own?", options=["No", "Yes"],
+                            default="No")
+    try:
+        link = at.make_link(parent, face, follower, anchor, mode.lower(),
+                            chain == "Yes")
+    except at.AttachError as exc:
+        ctx.echo(f"Not attached: {exc}.")
+        return
+    ctx.scene.update(follower.id,
+                     user_text=at.with_link(follower.user_text, link))
+    at.watch(ctx.scene)
+    keeps = ("its distance from " + where if mode == "Distance"
+             else "its share of the face")
+    ctx.echo(f"{follower.name} attached to {parent.name}: it rides that "
+             f"face and keeps {keeps}"
+             + (", and follows a chain." if chain == "Yes" else "."))
+
+
+@command("detach")
+def cmd_detach(ctx):
+    """Take away the attachment of the selected objects."""
+    from ..core import attachments as at
+    objs = yield SelectReq("Select attached objects to detach")
+    done = 0
+    for o in objs:
+        if at.link_of(o) is not None:
+            ctx.scene.update(o.id, user_text=at.with_link(o.user_text, None))
+            done += 1
+    ctx.echo(f"Detached {done} object(s)." if done
+             else "None of those is attached.")
