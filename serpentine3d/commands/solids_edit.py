@@ -521,3 +521,123 @@ def cmd_pushpull(ctx):
     if done:
         ctx.echo(f"Push/pulled {done} face(s) by "
                  f"{ctx.scene.format_length(dist)}.")
+
+
+@command("editdimension")
+def cmd_editdimension(ctx):
+    """Show and change a size, fillet, chamfer or hole from a picked edge.
+
+    Ctrl+Shift-click one edge or face first. On a box: a straight edge gives
+    its length along it, a flat face the distance to the face across, a
+    fillet or chamfer its size, a hole its diameter and a blind hole's floor
+    its depth. On a cylinder: its round side or edge gives the diameter, an
+    end or straight edge the height. A length first asks for the point that
+    stays put: click one, choose a side, or press Enter for the one offered
+    (the side on the construction plane, or the face across from a picked
+    face). The solid is rebuilt with everything else as it was: fillets
+    keep their radius when a box grows, and holes stay where they are. Works
+    on any such solid, however it was drawn, moved or imported."""
+    from ..core import solid_dimensions as sd
+    from .base import NumberReq, PointReq
+    held = list(ctx.selection.subobjects)
+    if len(held) != 1:
+        ctx.echo("Ctrl+Shift-click one edge or face first: a side gives its "
+                 "size, a fillet, chamfer or hole its own.")
+        return
+    obj_id, kind, index = held[0]
+    obj = ctx.scene.get(obj_id)
+    if obj is None:
+        return
+    try:
+        model = sd.read(obj.shape)
+        if kind == "edge":
+            pick = sd.pick_of_edge(model, g.edges_of(obj.shape)[index])
+        else:
+            pick = sd.pick_of_face(model, g.faces_of(obj.shape)[index])
+    except sd.NotRecognised as exc:
+        ctx.echo(f"{obj.name} has no dimensions to edit here: {exc}.")
+        return
+    fmt = ctx.scene.format_length
+    ctx.echo(f"{obj.name}: {sd.describe(model, fmt)}.")
+
+    if pick.what in ("size", "height"):
+        axis = pick.axis if pick.what == "size" else 0
+        # What stays put is asked every time, with an answer ready for
+        # Enter: the face across from a picked face, else the side standing
+        # on the construction plane, else the low side.
+        names = sd.side_names(model, axis)
+        if pick.side >= 0:
+            held_side = 1 - pick.side
+        else:
+            on = sd.side_on_plane(model, axis, ctx.cplane.origin,
+                                  ctx.cplane.normal)
+            held_side = 0 if on is None else on
+        offered = names[held_side]
+        anchor = yield PointReq(
+            f"Point that stays put (Enter for the {offered.lower()})",
+            allow_empty=True, extra_options=(names[0], "Middle", names[1]))
+        if anchor is None:
+            anchor = offered
+        if isinstance(anchor, str):
+            fraction = {names[0]: 0.0, "Middle": 0.5, names[1]: 1.0}[anchor]
+            where = f"the {anchor.lower()}"
+        else:
+            fraction = sd.anchor_at(model, axis, anchor)
+            where = "the picked point"
+        if pick.what == "size":
+            label = f"Size along {sd.axis_name(model, axis)}"
+            current = model.size[axis]
+        else:
+            label = "Height"
+            current = model.height
+        value = yield NumberReq(label, default=current, minimum=0)
+        if value <= 0:
+            ctx.echo("A size has to be above zero.")
+            return
+        new = (model.resized(axis, value, fraction) if pick.what == "size"
+               else model.resized(value, fraction))
+        label = f"{label}, held at {where}"
+    elif pick.what == "diameter":
+        label = "Diameter"
+        current = 2 * model.radius
+        value = yield NumberReq(label, default=current, minimum=0)
+        if value <= 0:
+            ctx.echo("A diameter has to be above zero.")
+            return
+        new = sd.CylinderModel(model.base, model.axis, value / 2,
+                               model.height)
+    elif pick.what == "fillet":
+        label = "Fillet radius"
+        current = model.fillets[pick.edge]
+        value = yield NumberReq(f"{label} (0 removes it)", default=current,
+                                minimum=0)
+        new = model.with_fillet(pick.edge, value)
+    elif pick.what == "chamfer":
+        label = "Chamfer distance"
+        current = model.chamfers[pick.edge]
+        value = yield NumberReq(f"{label} (0 removes it)", default=current,
+                                minimum=0)
+        new = model.with_chamfer(pick.edge, value)
+    elif pick.what == "hole":
+        label = "Hole diameter"
+        current = 2 * model.holes[pick.hole].radius
+        value = yield NumberReq(f"{label} (0 fills it)", default=current,
+                                minimum=0)
+        new = model.with_hole(pick.hole, radius=value / 2)
+    else:                                       # a blind hole's floor
+        label = "Hole depth"
+        current = model.holes[pick.hole].depth
+        value = yield NumberReq(label, default=current, minimum=0)
+        if value <= 0:
+            ctx.echo("A hole has to go in some way; pick its wall and give "
+                     "0 to fill it.")
+            return
+        new = model.with_hole(pick.hole, depth=value)
+    try:
+        shape = sd.build(new)
+    except g.GeometryError as exc:
+        ctx.echo(f"{obj.name}: {exc}. Nothing changed.")
+        return
+    ctx.scene.replace_shape(obj_id, shape)
+    ctx.selection.clear()          # the picked index means another edge now
+    ctx.echo(f"{label}: {fmt(current)} → {fmt(value)}.")
