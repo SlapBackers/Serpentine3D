@@ -100,30 +100,49 @@ def recognise(mesh: MeshShape, tolerance: float | None = None) -> Recognised:
 
 
 def convert_pieces(mesh: MeshShape, name: str, echo=None) -> list:
-    """[(name, shape)] for each separate piece of the mesh: a solid where
-    one was recognised, the piece itself, still a mesh, where not.
+    """[(name, shape)] for each part of the mesh: a solid where one was
+    recognised, the part itself, still a mesh, where not.
 
-    Shared by meshtobrep and the plugin, so both say the same things.
-    A lone piece keeps the mesh's name; several are numbered."""
+    The mesh is split into its parts first (core/mesh_parts.py), not into
+    every piece: a real STL has many more pieces than parts. Shared by
+    meshtobrep and the plugin, so both say the same things. A lone part
+    keeps the mesh's name; several are numbered, and what belongs to no
+    part stays together as one loose mesh."""
+    from .mesh_parts import smart_parts
     say = echo or (lambda _text: None)
-    pieces = split_pieces(mesh)
-    if len(pieces) > 1:
-        say(f"{name}: {len(pieces)} separate parts.")
+    found_parts = smart_parts(mesh)
+    parts = found_parts.parts
     out = []
-    for k, piece in enumerate(pieces, 1):
-        label = name if len(pieces) == 1 else f"{name} {k}"
+    solids = 0
+    for k, part in enumerate(parts, 1):
+        label = name if len(parts) == 1 else f"{name} part {k}"
         try:
-            found = recognise(piece)
+            found = recognise(part)
         except RecogniseError as exc:
-            say(f"{label}: left as a mesh, {exc}.")
-            out.append((label, piece))
+            if len(parts) <= _NAMED:
+                say(f"{label}: left as a mesh, {exc}.")
+            out.append((label, part))
             continue
-        what = ("a straight extrusion" if found.kind == "extrusion"
-                else "flat faces")
-        say(f"{label}: {found.triangles:,} triangles became "
-            f"{found.faces:,} faces ({what}).")
+        solids += 1
+        if len(parts) <= _NAMED:
+            what = ("a straight extrusion" if found.kind == "extrusion"
+                    else "flat faces")
+            say(f"{label}: {found.triangles:,} triangles became "
+                f"{found.faces:,} faces ({what}).")
         out.append((label, found.shape))
+    if found_parts.loose is not None:
+        out.append((f"{name} loose", found_parts.loose))
+    if len(parts) > 1:
+        say(f"{name}: {found_parts.pieces:,} pieces make {len(parts):,} "
+            f"parts; {solids:,} became solids"
+            + (", the rest stay meshes" if solids < len(parts) else "")
+            + (", and loose pieces stay together" if found_parts.loose
+               is not None else "") + ".")
     return out
+
+
+# a file with more parts than this is reported in one line, not one per part
+_NAMED = 12
 
 
 # --- separate parts ---------------------------------------------------------
@@ -138,21 +157,9 @@ def split_pieces(mesh: MeshShape) -> list:
     tris = canonical[np.asarray(mesh.triangles, np.int64)]
     if not len(tris):
         return [mesh]
-    # Every corner takes the smallest label among the triangles it is in,
-    # then labels are chased to their root; repeated until nothing moves.
-    label = np.arange(len(points))
-    while True:
-        lowest = label[tris].min(axis=1)
-        moved = label.copy()
-        np.minimum.at(moved, tris.ravel(), np.repeat(lowest, 3))
-        while True:
-            chased = moved[moved]
-            if np.array_equal(chased, moved):
-                break
-            moved = chased
-        if np.array_equal(moved, label):
-            break
-        label = moved
+    from .mesh_parts import components
+    label = components(len(points), np.concatenate((tris[:, 0], tris[:, 1])),
+                       np.concatenate((tris[:, 1], tris[:, 2])))
     owner = label[tris[:, 0]]
     roots, piece_of, sizes = np.unique(owner, return_inverse=True,
                                        return_counts=True)
@@ -560,8 +567,11 @@ def _flat_regions(m: _Prepared, tolerance: float):
     _worth_rebuilding(m, region)
     faces = []
     loose = []
-    for label in np.unique(region):
-        members = np.flatnonzero(region == label)
+    # one sort hands every group its triangles; asking the whole part
+    # which triangles carry each label in turn costs groups x triangles
+    order = np.argsort(region, kind="stable")
+    cuts = np.flatnonzero(np.diff(region[order])) + 1
+    for members in np.split(order, cuts):
         face = _region_face(m, members, tolerance) if len(members) > 1 \
             else None
         if face is None:
@@ -624,19 +634,8 @@ def _coplanar_groups(m: _Prepared, tolerance: float) -> np.ndarray:
         "ij,ij->i", m.normals[a],
         m.points[m.tris[b, 0]] - m.points[m.tris[a, 0]]))
     join = same_way & (offset <= tolerance)
-    parent = np.arange(len(m.tris))
-
-    def root(i):
-        while parent[i] != i:
-            parent[i] = parent[parent[i]]
-            i = parent[i]
-        return i
-
-    for i, j in zip(a[join].tolist(), b[join].tolist()):
-        ri, rj = root(i), root(j)
-        if ri != rj:
-            parent[max(ri, rj)] = min(ri, rj)
-    return np.array([root(i) for i in range(len(parent))])
+    from .mesh_parts import components
+    return components(len(m.tris), a[join], b[join])
 
 
 def _region_face(m: _Prepared, members, tolerance):

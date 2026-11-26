@@ -228,6 +228,7 @@ Commands that need a file open a filtered chooser by default. Append
 | `lock` | Lock what is picked, in the model or on a sheet: still drawn and snapped to, but not pickable. |
 | `lockother` | Lock everything except what you picked, as Rhino's LockOther does (on a sheet, the rest of that sheet). |
 | `matchprops` (`matchproperties`) | Copy an object's layer, colour, material, print width and hatch. |
+| `meshparts` | Split meshes into their parts: each closed piece with what belongs to it. |
 | `meshtobrep` | Convert closed meshes into solids with their flat faces and holes. |
 | `pointcloud` (`pc`) | Point clouds: `info` says what a scan holds; `subsample` keeps an |
 | `printwidth` (`plotweight`, `printweight`) | Set the pen width selected objects plot with, or ByLayer. |

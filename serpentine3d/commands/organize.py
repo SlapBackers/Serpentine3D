@@ -266,7 +266,7 @@ def cmd_pointcloud(ctx):
 def cmd_meshtobrep(ctx):
     """Convert closed meshes into solids with their flat faces and holes.
 
-    Separate pieces of one mesh become separate objects first. A straight
+    The mesh is split into its parts first (as meshparts does). A straight
     extrusion comes back as its outline extruded, holes as true cylinders;
     otherwise coplanar triangles merge into single faces. A piece with too
     little to find stays a mesh. Method=Faceted converts triangle by
@@ -303,6 +303,45 @@ def cmd_meshtobrep(ctx):
                 solids += 1
     ctx.echo(f"{solids} solid(s) made"
              + (f", {meshes} part(s) left as meshes." if meshes else "."))
+
+
+@command("meshparts")
+def cmd_meshparts(ctx):
+    """Split meshes into their parts: each closed piece with what belongs
+    to it.
+
+    An STL of an assembly holds far more pieces than parts: open surfaces
+    and fragments left by the export. Each closed piece is a part, and
+    every other piece joins the smallest part around it. Asks for the
+    smallest part to keep separate: a closed piece smaller than that (its
+    box's diagonal) joins the part around it too; Enter keeps every one.
+    Unlike splitdisjointmesh, which makes one object of every piece."""
+    from ..core.mesh_parts import smart_parts
+    from .base import LengthReq
+    objs = yield SelectReq("Select meshes to split into parts",
+                           kinds=("mesh",))
+    smallest = yield LengthReq("Smallest part to keep separate (Enter "
+                               "keeps every closed piece)", default=0.0,
+                               minimum=0.0)
+    for o in objs:
+        found = smart_parts(o.shape, smallest=float(smallest or 0.0))
+        if len(found.parts) == 1 and found.loose is None:
+            ctx.echo(f"{o.name} is one part.")
+            continue
+        with ctx.scene.batched():
+            for k, part in enumerate(found.parts, 1):
+                ctx.scene.add(part, name=f"{o.name} part {k}",
+                              layer_id=o.layer_id)
+            if found.loose is not None:
+                ctx.scene.add(found.loose, name=f"{o.name} loose",
+                              layer_id=o.layer_id)
+            ctx.scene.remove(o.id)
+        ctx.echo(f"{o.name}: {found.pieces:,} pieces make "
+                 f"{len(found.parts):,} parts ({found.closed:,} closed "
+                 f"pieces; {found.folded:,} open pieces and fragments "
+                 f"joined the part around them"
+                 + (", the rest kept as loose" if found.loose is not None
+                    else "") + ").")
 
 
 @command("splitdisjointmesh")

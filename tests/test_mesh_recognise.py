@@ -132,16 +132,16 @@ def test_separate_pieces_are_found(tmp_path):
     assert split_pieces(pieces[0]) == [pieces[0]]
 
 
-def test_meshtobrep_makes_one_solid_per_piece(tmp_path):
+def test_meshtobrep_makes_one_solid_per_part(tmp_path):
     doc = Document()
     doc.add(_two_plates(tmp_path), name="Parts")
     said = doc.run("meshtobrep", ["Parts", ""])
     assert doc.get("Parts") is None
-    for name in ("Parts 1", "Parts 2"):
+    for name in ("Parts part 1", "Parts part 2"):
         obj = doc.get(name)
         assert obj.kind == "solid"
         assert len(g.faces_of(obj.shape)) == 8
-    assert any("2 separate parts" in s for s in said)
+    assert any("make 2 parts; 2 became solids" in s for s in said)
 
 
 def test_splitdisjointmesh_leaves_meshes(tmp_path):
