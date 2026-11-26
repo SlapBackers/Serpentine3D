@@ -111,7 +111,7 @@ def test_grow_end_keeps_the_start_where_it_was():
     doc.selection.set_subobjects([(obj.id, "edge", edge)])
     doc.run("editdimension", ["Grow=End", "50"])
     lo, hi = g.bbox(doc.get("Box").shape)
-    assert lo[0] == pytest.approx(0)
+    assert lo[0] == pytest.approx(0, abs=1e-6)    # a box reads its tolerance
     assert hi[0] == pytest.approx(50)
 
 
@@ -123,7 +123,7 @@ def test_a_picked_face_is_the_one_that_moves():
     doc.selection.set_subobjects([(obj.id, "face", right)])
     doc.run("editdimension", ["60"])
     lo, hi = g.bbox(doc.get("Box").shape)
-    assert lo[0] == pytest.approx(0)
+    assert lo[0] == pytest.approx(0, abs=1e-6)    # a box reads its tolerance
     assert hi[0] == pytest.approx(60)
 
 
