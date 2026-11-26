@@ -264,11 +264,32 @@ def cmd_pointcloud(ctx):
 
 @command("meshtobrep")
 def cmd_meshtobrep(ctx):
-    """Convert mesh objects into exact BREP shells (slow for big meshes)."""
-    objs = yield SelectReq("Select meshes to convert", kinds=("mesh",))
+    """Convert closed meshes into solids with their flat faces and holes.
+
+    A straight extrusion comes back as its outline extruded, holes as true
+    cylinders; otherwise coplanar triangles merge into single faces. A mesh
+    that cannot be matched keeps one face per triangle, as Method=Faceted
+    always does."""
+    objs = yield SelectReq("Select meshes to convert", kinds=("mesh",),
+                           choices={"Method": ["Recognise", "Faceted"]})
     from ..core.mesh import brep_from_mesh
+    from ..core.mesh_recognise import RecogniseError, recognise
+    recognising = ctx.opt("Method", "Recognise") == "Recognise"
     done = 0
     for o in objs:
+        if recognising:
+            try:
+                found = recognise(o.shape)
+            except RecogniseError as exc:
+                ctx.echo(f"{o.name}: kept as triangles, {exc}.")
+            else:
+                ctx.scene.replace_shape(o.id, found.shape)
+                what = ("a straight extrusion" if found.kind == "extrusion"
+                        else "flat faces")
+                ctx.echo(f"{o.name}: {found.triangles:,} triangles became "
+                         f"{found.faces:,} faces ({what}).")
+                done += 1
+                continue
         try:
             ctx.scene.replace_shape(o.id, brep_from_mesh(o.shape))
             done += 1
