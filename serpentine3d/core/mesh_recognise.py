@@ -422,35 +422,49 @@ def _wire(frame: _Frame, segs):
     return mk.Wire()
 
 
+def _prism(frame, plane, segs, height):
+    """One outline pushed up the axis into a solid."""
+    from OCP.BRepLib import BRepLib
+    wire = _wire(frame, segs)
+    if wire is None:
+        return None
+    mk = occ.BRepBuilderAPI_MakeFace(plane, wire, True)
+    if not mk.IsDone():
+        return None
+    d = frame.axis * height
+    prism = occ.BRepPrimAPI_MakePrism(
+        mk.Face(), occ.gp_Vec(float(d[0]), float(d[1]), float(d[2])))
+    if not prism.IsDone():
+        return None
+    solid = occ.to_solid(prism.Shape())
+    BRepLib.OrientClosedSolid_s(solid)    # outward, whichever way it ran
+    return solid
+
+
 def _build_extrusion(frame, profile, fitted, height):
-    from OCP.ShapeFix import ShapeFix_Face
+    """Each outline extruded, its holes extruded and cut away.
+
+    Cutting rather than adding the holes to the cap face spares asking
+    which way round each loop runs: a hole wire running the same way as
+    its outline makes a face OpenCASCADE calls invalid, and a full circle
+    has no direction of its own to go by."""
+    from .geometry import GeometryError, boolean_difference
     plane = occ.gp_Pln(occ.gp_Ax3(_pnt(frame.origin),
                                   occ.gp_Dir(*map(float, frame.axis)),
                                   occ.gp_Dir(*map(float, frame.u))))
     solids = []
     for outer, holes in profile:
-        wire = _wire(frame, fitted[outer])
-        if wire is None:
+        solid = _prism(frame, plane, fitted[outer], height)
+        if solid is None:
             return None
-        mk = occ.BRepBuilderAPI_MakeFace(plane, wire, True)
         for hole in holes:
-            inner = _wire(frame, fitted[hole])
-            if inner is None:
+            cutter = _prism(frame, plane, fitted[hole], height)
+            if cutter is None:
                 return None
-            mk.Add(inner)
-        if not mk.IsDone():
-            return None
-        fix = ShapeFix_Face(mk.Face())
-        fix.Perform()
-        face = fix.Face()
-        d = frame.axis * height
-        prism = occ.BRepPrimAPI_MakePrism(
-            face, occ.gp_Vec(float(d[0]), float(d[1]), float(d[2])))
-        if not prism.IsDone():
-            return None
-        from OCP.BRepLib import BRepLib
-        solid = occ.to_solid(prism.Shape())
-        BRepLib.OrientClosedSolid_s(solid)   # outward, whichever way the cap faced
+            try:
+                solid = boolean_difference(solid, cutter)
+            except GeometryError:
+                return None
         solids.append(solid)
     if len(solids) == 1:
         return solids[0]

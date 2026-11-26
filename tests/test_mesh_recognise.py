@@ -96,9 +96,26 @@ def test_a_part_that_is_no_extrusion_keeps_its_flat_faces(tmp_path):
                                                   rel=1e-6)
 
 
-def test_a_mesh_with_nothing_flat_is_left_to_the_facets(tmp_path):
+def _tetrahedron():
+    """Four triangles, no two on one plane: nothing to recognise."""
+    return MeshShape(
+        np.array([[0, 0, 0], [10, 0, 0], [0, 10, 0], [0, 0, 10]], float),
+        np.array([[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]], np.uint32))
+
+
+def test_a_mesh_with_nothing_flat_is_left_to_the_facets():
     with pytest.raises(RecogniseError):
-        recognise(_as_stl(g.make_sphere((0, 0, 0), 10), tmp_path))
+        recognise(_tetrahedron())
+
+
+def test_a_curved_part_still_merges_what_is_flat(tmp_path):
+    # the kernel meshes a sphere in flat four-sided patches, two triangles
+    # each; those come back as one face apiece, the rest stays curved
+    mesh = _as_stl(g.make_sphere((0, 0, 0), 10), tmp_path)
+    found = recognise(mesh)
+    assert found.kind == "faces"
+    assert found.faces < found.triangles
+    assert g.shape_kind(found.shape) == "solid"
 
 
 def test_an_open_mesh_is_refused():
@@ -118,12 +135,13 @@ def test_meshtobrep_says_what_it_found(tmp_path):
     assert any("became 8 faces (a straight extrusion)" in s for s in said)
 
 
-def test_meshtobrep_keeps_the_facets_when_nothing_matches(tmp_path):
+def test_meshtobrep_keeps_the_facets_when_nothing_matches():
     doc = Document()
-    doc.add(_as_stl(g.make_sphere((0, 0, 0), 10), tmp_path), name="Ball")
-    said = doc.run("meshtobrep", ["Ball", ""])
+    doc.add(_tetrahedron(), name="Tetra")
+    said = doc.run("meshtobrep", ["Tetra", ""])
     assert any("kept as triangles" in s for s in said)
-    assert doc.get("Ball").kind in ("surface", "solid")
+    assert doc.get("Tetra").kind in ("surface", "solid")
+    assert len(g.faces_of(doc.get("Tetra").shape)) == 4
 
 
 def test_method_faceted_still_gives_one_face_per_triangle(tmp_path):
