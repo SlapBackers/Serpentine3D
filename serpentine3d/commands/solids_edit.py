@@ -521,3 +521,69 @@ def cmd_pushpull(ctx):
     if done:
         ctx.echo(f"Push/pulled {done} face(s) by "
                  f"{ctx.scene.format_length(dist)}.")
+
+
+@command("editdimension")
+def cmd_editdimension(ctx):
+    """Show and change a box's size or a fillet's radius from a picked edge.
+
+    Ctrl+Shift-click one edge or face of a box first. A straight edge gives
+    the box's length along it, a flat face the distance to the face across
+    (that face is the one that moves), a fillet its radius. The box is
+    rebuilt and its fillets made again on the same edges, so they keep
+    their radius when the box changes size. Works on any box with filleted
+    edges, however it was drawn, moved or imported."""
+    from ..core import box_dimensions as bd
+    from .base import NumberReq
+    held = list(ctx.selection.subobjects)
+    if len(held) != 1:
+        ctx.echo("Ctrl+Shift-click one edge or face of a box first: a side "
+                 "gives its size, a fillet its radius.")
+        return
+    obj_id, kind, index = held[0]
+    obj = ctx.scene.get(obj_id)
+    if obj is None:
+        return
+    try:
+        model = bd.read(obj.shape)
+        if kind == "edge":
+            pick = bd.pick_of_edge(model, g.edges_of(obj.shape)[index])
+        else:
+            pick = bd.pick_of_face(model, g.faces_of(obj.shape)[index])
+    except bd.NotABox as exc:
+        ctx.echo(f"{obj.name} has no dimensions to edit here: {exc}.")
+        return
+    fmt = ctx.scene.format_length
+    ctx.echo(f"{obj.name}: {bd.describe(model, fmt)}.")
+    if pick.what == "radius":
+        label = "Fillet radius"
+        current = model.fillets[pick.edge]
+        value = yield NumberReq(f"{label} (0 removes it)", default=current,
+                                minimum=0)
+        if value <= 0:
+            fillets = dict(model.fillets)
+            del fillets[pick.edge]
+            new = bd.BoxModel(model.origin, model.axes, model.size, fillets)
+        else:
+            new = model.with_radius(pick.edge, value)
+    else:
+        label = f"Size along {bd.axis_name(model, pick.axis)}"
+        current = model.size[pick.axis]
+        choices = None if pick.side >= 0 else {"Grow": ["Both", "End",
+                                                        "Start"]}
+        value = yield NumberReq(label, default=current, minimum=0,
+                                choices=choices)
+        if value <= 0:
+            ctx.echo("A box needs a size above zero.")
+            return
+        grow = (("start", "end")[pick.side] if pick.side >= 0
+                else ctx.opt("Grow", "Both").lower())
+        new = model.resized(pick.axis, value, grow)
+    try:
+        shape = bd.build(new)
+    except g.GeometryError as exc:
+        ctx.echo(f"{obj.name}: {exc}. Nothing changed.")
+        return
+    ctx.scene.replace_shape(obj_id, shape)
+    ctx.selection.clear()          # the picked index means another edge now
+    ctx.echo(f"{label}: {fmt(current)} → {fmt(value)}.")
