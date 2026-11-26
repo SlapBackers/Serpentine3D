@@ -47,6 +47,7 @@ _SIMILAR_CHORDS = 2.5
 # coplanar triangles cover most of the part, and the solid would not have
 # an unworkable number of faces.
 _FLAT_GROUP = 3
+_FOLD_DEG = 30.0        # sharper than this between faces is an edge drawn
 _MOST_CURVED = 0.5
 _MAX_FACES = 20000
 # Fewest points that make a whole loop a circle rather than a polygon: a
@@ -556,7 +557,7 @@ def _build_extrusion(frame, profile, fitted, height):
 def _flat_regions(m: _Prepared, tolerance: float):
     """Each run of coplanar neighbours as one face, the rest as triangles."""
     region = _coplanar_groups(m, tolerance)
-    _worth_rebuilding(region)
+    _worth_rebuilding(m, region)
     faces = []
     loose = []
     for label in np.unique(region):
@@ -585,19 +586,29 @@ def _flat_regions(m: _Prepared, tolerance: float):
     return checked
 
 
-def _worth_rebuilding(region: np.ndarray):
+def _worth_rebuilding(m: _Prepared, region: np.ndarray):
     """Refuse, before any kernel work, a part that is mostly curved.
 
     A curved surface is meshed in strips of flat four-sided patches, two
     triangles each, which merge into faces that help nobody edit it: a
     rendering model of a glass would come back as a hundred thousand faces
-    after minutes of sewing. A flat face worth having spans more than one
-    patch, so only groups of three or more count, and they have to make up
-    most of the part."""
-    _, sizes = np.unique(region, return_counts=True)
-    flat = sizes[sizes >= _FLAT_GROUP].sum()
-    loose = len(region) - flat
-    faces = int((sizes >= _FLAT_GROUP).sum()) + int(loose)
+    after minutes of sewing. Size alone cannot tell such a patch from a
+    box's side, which is two triangles too. Its edges can: a real face
+    meets a neighbour at a fold somewhere, while a patch on a curve meets
+    every neighbour almost flat. A group is a face when it is large or
+    has a fold on its border, and faces have to make up most of the part."""
+    labels, group_of, sizes = np.unique(region, return_inverse=True,
+                                        return_counts=True)
+    group_of = np.asarray(group_of).ravel()
+    a, b = m.pairs[:, 0], m.pairs[:, 1]
+    border = group_of[a] != group_of[b]
+    fold = border & (np.einsum("ij,ij->i", m.normals[a], m.normals[b])
+                     < math.cos(math.radians(_FOLD_DEG)))
+    is_face = sizes >= _FLAT_GROUP
+    is_face[group_of[a[fold]]] = True
+    is_face[group_of[b[fold]]] = True
+    loose = int(sizes[~is_face].sum())
+    faces = int(is_face.sum()) + loose
     if loose > len(region) * _MOST_CURVED or faces > _MAX_FACES:
         raise RecogniseError("too little of it is flat to be worth "
                              "rebuilding")
