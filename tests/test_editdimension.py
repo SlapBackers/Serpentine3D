@@ -98,21 +98,64 @@ def test_retyping_an_edge_grows_the_box_and_keeps_the_fillets():
     shape = doc.get("Box").shape
     lo, hi = g.bbox(shape)
     assert hi[0] - lo[0] == pytest.approx(50)
-    assert (lo[0] + hi[0]) / 2 == pytest.approx(20)    # grew both ways
+    assert lo[0] == pytest.approx(0, abs=1e-6)        # grew from the left
     assert _radii(shape) == pytest.approx([3, 3, 3, 3])
     assert g.volume(shape) == pytest.approx(
         50 * 30 * 20 - _corner_loss(3, 20), rel=1e-6)
     assert any("Size along X" in s and "50" in s for s in said)
 
 
-def test_grow_end_keeps_the_start_where_it_was():
+def test_a_box_on_the_construction_plane_stays_on_it():
+    # the box from the discussion's test: standing on Z=0, made taller
+    doc, obj = _doc_with(_filleted_box())
+    edge = _straight_edge_along(obj.shape, 2)
+    doc.selection.set_subobjects([(obj.id, "edge", edge)])
+    said = doc.run("editdimension", ["50"])
+    lo, hi = g.bbox(doc.get("Box").shape)
+    assert lo[2] == pytest.approx(0, abs=1e-6)
+    assert hi[2] == pytest.approx(50)
+    assert any("held at the bottom" in s for s in said)
+
+
+def test_a_box_hanging_under_the_plane_keeps_its_top_on_it():
+    doc, obj = _doc_with(g.translate(_filleted_box(), (0, 0, -20)))
+    edge = _straight_edge_along(obj.shape, 2)
+    doc.selection.set_subobjects([(obj.id, "edge", edge)])
+    doc.run("editdimension", ["50"])
+    lo, hi = g.bbox(doc.get("Box").shape)
+    assert hi[2] == pytest.approx(0, abs=1e-6)
+    assert lo[2] == pytest.approx(-50)
+
+
+def test_anchor_middle_grows_both_ways():
     doc, obj = _doc_with(_filleted_box())
     edge = _straight_edge_along(obj.shape, 0)
     doc.selection.set_subobjects([(obj.id, "edge", edge)])
-    doc.run("editdimension", ["Grow=End", "50"])
+    doc.run("editdimension", ["Anchor=Middle", "50"])
     lo, hi = g.bbox(doc.get("Box").shape)
-    assert lo[0] == pytest.approx(0, abs=1e-6)    # a box reads its tolerance
+    assert (lo[0] + hi[0]) / 2 == pytest.approx(20)
+
+
+def test_anchor_right_keeps_the_right_side_where_it_was():
+    doc, obj = _doc_with(_filleted_box())
+    edge = _straight_edge_along(obj.shape, 0)
+    doc.selection.set_subobjects([(obj.id, "edge", edge)])
+    doc.run("editdimension", ["Anchor=Right", "50"])
+    lo, hi = g.bbox(doc.get("Box").shape)
+    assert hi[0] == pytest.approx(40, abs=1e-6)
+    assert lo[0] == pytest.approx(-10)
+
+
+def test_anchor_point_holds_the_point_picked():
+    # held at x=30 of 0..40: that point stays, the box scales about it
+    doc, obj = _doc_with(_filleted_box())
+    edge = _straight_edge_along(obj.shape, 0)
+    doc.selection.set_subobjects([(obj.id, "edge", edge)])
+    said = doc.run("editdimension", ["Anchor=Point", "80", "30,0,0"])
+    lo, hi = g.bbox(doc.get("Box").shape)
+    assert lo[0] == pytest.approx(-30)
     assert hi[0] == pytest.approx(50)
+    assert any("held at the picked point" in s for s in said)
 
 
 def test_a_picked_face_is_the_one_that_moves():

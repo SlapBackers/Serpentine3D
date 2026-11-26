@@ -46,12 +46,15 @@ class BoxModel:
     size: tuple
     fillets: dict = field(default_factory=dict)
 
-    def resized(self, axis: int, value: float, grow: str = "both"):
-        """The box `value` long along `axis`, its fillets unchanged. `grow`
-        says which side moves: "end" (side 1), "start" (side 0) or
-        "both" (the centre stays)."""
+    def resized(self, axis: int, value: float, anchor: float = 0.0):
+        """The box `value` long along `axis`, its fillets unchanged.
+
+        `anchor` is the place that stays put, as a fraction of the old
+        length from side 0: 0 holds side 0, 1 holds side 1, 0.5 the middle,
+        and any other number a point that far along, inside the box or
+        not. Everything else scales about it along that axis."""
         delta = value - self.size[axis]
-        shift = {"end": 0.0, "start": -delta, "both": -delta / 2}[grow]
+        shift = -anchor * delta
         origin = np.asarray(self.origin) + shift * np.asarray(self.axes[axis])
         size = list(self.size)
         size[axis] = value
@@ -269,6 +272,45 @@ def pick_of_face(model: BoxModel, face) -> Pick:
         if key in model.fillets:
             return Pick("radius", edge=key)
     raise NotABox("that face is neither a side of the box nor a fillet")
+
+
+_SIDE_NAMES = (("Left", "Right"), ("Front", "Back"), ("Bottom", "Top"))
+
+
+def side_names(model: BoxModel, axis: int) -> tuple:
+    """What to call side 0 and side 1 along an axis: Bottom and Top along
+    the world's Z, Left and Right along X, Front and Back along Y, the
+    right way round even when the box has been turned over; Start and End
+    when the axis is not one of the world's."""
+    a = np.asarray(model.axes[axis])
+    i = int(np.argmax(np.abs(a)))
+    if abs(a[i]) <= _PARALLEL:
+        return ("Start", "End")
+    low, high = _SIDE_NAMES[i]
+    return (low, high) if a[i] > 0 else (high, low)
+
+
+def side_on_plane(model: BoxModel, axis: int, origin, normal,
+                  tolerance: float = 1e-6):
+    """0 or 1 if that side of the box lies on the plane, else None: the
+    side a box drawn on the construction plane stands on."""
+    n = np.asarray(normal, float)
+    a = np.asarray(model.axes[axis])
+    if abs(float(np.dot(n, a))) <= _PARALLEL:
+        return None
+    for side in (0, 1):
+        corner = np.asarray(model.origin) + side * model.size[axis] * a
+        if abs(float(np.dot(corner - np.asarray(origin, float), n))) \
+                <= tolerance * max(1.0, max(model.size)):
+            return side
+    return None
+
+
+def anchor_at(model: BoxModel, axis: int, point) -> float:
+    """Where a point sits along an axis, as resized() takes an anchor."""
+    t = float(np.dot(np.asarray(point, float) - np.asarray(model.origin),
+                     model.axes[axis]))
+    return t / model.size[axis]
 
 
 def axis_name(model: BoxModel, axis: int) -> str:

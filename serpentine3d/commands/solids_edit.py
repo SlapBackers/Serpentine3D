@@ -529,7 +529,9 @@ def cmd_editdimension(ctx):
 
     Ctrl+Shift-click one edge or face of a box first. A straight edge gives
     the box's length along it, a flat face the distance to the face across
-    (that face is the one that moves), a fillet its radius. The box is
+    (that face is the one that moves), a fillet its radius. Anchor says what
+    stays put: a side, the middle, or a point you pick; a box standing on
+    the construction plane stays on it. The box is
     rebuilt and its fillets made again on the same edges, so they keep
     their radius when the box changes size. Works on any box with filleted
     edges, however it was drawn, moved or imported."""
@@ -569,16 +571,35 @@ def cmd_editdimension(ctx):
     else:
         label = f"Size along {bd.axis_name(model, pick.axis)}"
         current = model.size[pick.axis]
-        choices = None if pick.side >= 0 else {"Grow": ["Both", "End",
-                                                        "Start"]}
+        # What stays put. A picked face moves and the one across holds; a
+        # box standing on the construction plane keeps standing on it;
+        # otherwise the low side holds, as the box grew when it was drawn.
+        names = bd.side_names(model, pick.axis)
+        if pick.side >= 0:
+            held_side = 1 - pick.side
+        else:
+            on = bd.side_on_plane(model, pick.axis, ctx.cplane.origin,
+                                  ctx.cplane.normal)
+            held_side = 0 if on is None else on
+        default = names[held_side]
+        anchors = [default] + [a for a in (names[0], "Middle", names[1],
+                                           "Point") if a != default]
         value = yield NumberReq(label, default=current, minimum=0,
-                                choices=choices)
+                                choices={"Anchor": anchors})
         if value <= 0:
             ctx.echo("A box needs a size above zero.")
             return
-        grow = (("start", "end")[pick.side] if pick.side >= 0
-                else ctx.opt("Grow", "Both").lower())
-        new = model.resized(pick.axis, value, grow)
+        anchor = ctx.opt("Anchor", default)
+        if anchor == "Point":
+            from .base import PointReq
+            point = yield PointReq("Point that stays put")
+            fraction = bd.anchor_at(model, pick.axis, point)
+            where = "the picked point"
+        else:
+            fraction = {names[0]: 0.0, "Middle": 0.5, names[1]: 1.0}[anchor]
+            where = f"the {anchor.lower()}"
+        new = model.resized(pick.axis, value, fraction)
+        label = f"{label}, held at {where}"
     try:
         shape = bd.build(new)
     except g.GeometryError as exc:
