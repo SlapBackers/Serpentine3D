@@ -20,7 +20,7 @@ import numpy as np
 from .mesh import MeshShape
 
 _CORNER_DEG = 30.0           # an outline turning more than this is a corner
-_MIN_CIRCLE_POINTS = 8
+_MIN_LOOP_POINTS = 8
 _ROUND = 1e-3                # how far off its circle a loop's point may be,
                              # as a share of the radius
 
@@ -86,7 +86,7 @@ def _round_loop_centres(points, ids, degree) -> list:
             loop.append(at)
             nxt = neighbours[at]
             previous, at = at, nxt[0] if nxt[1] == previous else nxt[1]
-        if closed and len(loop) >= _MIN_CIRCLE_POINTS:
+        if closed and len(loop) >= _MIN_LOOP_POINTS:
             centre = _circle_centre(points[loop])
             if centre is not None:
                 centres.append(centre)
