@@ -5,9 +5,9 @@ With an OBJ imported and the pointer over the pane, asking for a point raised
 gatherer handled pictures, text and point clouds by name and treated
 everything else as an OpenCascade shape. A plain mesh is none of those.
 
-A mesh brings no end, mid or centre points of its own; it has no edges in the
-CAD sense. What it keeps is what every visible object has, the nearest point
-on its drawn outline, and the other objects' snaps go on working beside it.
+A mesh has no edges in the CAD sense, but the corners of its drawn outline
+snap as ends (core/mesh_snaps.py), and the other objects' snaps go on
+working beside it.
 """
 
 from __future__ import annotations
@@ -27,8 +27,11 @@ def _tablet():
                      [[0, 1, 2], [0, 2, 3]])
 
 
-def test_a_mesh_offers_no_cad_snap_points_and_does_not_raise():
-    assert _static_snap_points(_tablet()) == []
+def test_a_mesh_offers_its_corners_and_does_not_raise():
+    corners = sorted(p for p, kind in _static_snap_points(_tablet())
+                     if kind == "end")
+    assert corners == pytest.approx([(0, 0, 0), (0, 14, 0), (20, 0, 0),
+                                     (20, 14, 0)])
 
 
 def test_a_curve_end_still_snaps_with_a_mesh_beside_it():

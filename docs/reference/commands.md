@@ -228,7 +228,8 @@ Commands that need a file open a filtered chooser by default. Append
 | `lock` | Lock what is picked, in the model or on a sheet: still drawn and snapped to, but not pickable. |
 | `lockother` | Lock everything except what you picked, as Rhino's LockOther does (on a sheet, the rest of that sheet). |
 | `matchprops` (`matchproperties`) | Copy an object's layer, colour, material, print width and hatch. |
-| `meshtobrep` | Convert mesh objects into exact BREP shells (slow for big meshes). |
+| `meshparts` | Split meshes into their parts: each closed piece with what belongs to it. |
+| `meshtobrep` | Convert closed meshes into solids with their flat faces and holes. |
 | `pointcloud` (`pc`) | Point clouds: `info` says what a scan holds; `subsample` keeps an |
 | `printwidth` (`plotweight`, `printweight`) | Set the pen width selected objects plot with, or ByLayer. |
 | `purge` | Remove empty layers and unused block definitions. |
@@ -236,6 +237,7 @@ Commands that need a file open a filtered chooser by default. Append
 | `sendbackward` (`sendbackwards`) | Nudge the selected objects one step towards the back. |
 | `sendtoback` (`sb`) | Draw the selected objects behind overlapping ones. |
 | `setusertext` (`setattributeusertext`) | Set a key of user text on the selected objects, as Rhino's SetUserText does. |
+| `splitdisjointmesh` | Split meshes into their separate pieces, one object each. |
 | `ungroup` | Ungroup objects and keep them selected. |
 | `unlockall` (`unlock`) | Unlock every locked object and every locked sheet item. |
 | `what` | Report details of the selected objects. |

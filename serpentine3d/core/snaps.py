@@ -144,11 +144,13 @@ def _static_snap_points(shape) -> list[tuple[tuple, str]]:
     from .dimension import DimensionShape
     if isinstance(shape, (TextShape, HatchShape, DimensionShape)):
         return shape.snap_points()
-    # Any other mesh (an OBJ, an STL) has triangles, not CAD edges: no end,
-    # mid or centre of its own. The nearest point on its outline still snaps.
+    # Any other mesh (an OBJ, an STL) has triangles, not CAD edges, but the
+    # edges drawn on the object it was made from are folds in it: their
+    # corners snap as ends, and a round loop of them as a centre.
     from .mesh import MeshShape
     if isinstance(shape, MeshShape):
-        return []
+        from .mesh_snaps import mesh_snap_points
+        return mesh_snap_points(shape)
 
     if shape.ShapeType() == occ.VERTEX:
         x, y, z = geometry.point_coords(shape)
