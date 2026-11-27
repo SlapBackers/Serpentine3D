@@ -122,8 +122,11 @@ def _do(ctx, held, objs, fn, verb, tail="", action=None):
     if held:
         _do_to_parts(ctx, held, fn, verb, tail, action)
         return
-    for o in objs:
-        ctx.scene.replace_shape(o.id, fn(o.shape))
+    # one change, told once: what moves together is seen moving together
+    # (an attached object moved with what it stands on stays attached)
+    with ctx.scene.batched():
+        for o in objs:
+            ctx.scene.replace_shape(o.id, fn(o.shape))
     ctx.select_result(objs)
     ctx.echo(f"{verb} {len(objs)} object(s){tail}.")
 

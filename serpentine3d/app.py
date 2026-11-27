@@ -247,6 +247,9 @@ class MainWindow(QMainWindow):
         self._form_dialog_open = False
         self._offered_form = None
         self.ctx.add_echo_listener(self.command_line.echo)
+        # attached objects follow their faces however those faces change
+        from .core import attachments
+        attachments.watch(self.scene, self.ctx.echo)
         self.processor.add_listener(self._sync_command_state)
         self.processor.add_listener(self._resume_dropped_imports)
         self.processor.add_listener(self._after_hatch_patterns)

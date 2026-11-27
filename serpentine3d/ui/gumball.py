@@ -2062,13 +2062,14 @@ class Gumball:
     def _apply(self, fn):
         d = self.drag
         vp = self.vp
-        for obj_id, original in d["originals"].items():
-            if vp.scene.get(obj_id) is None:
-                continue
-            try:
-                vp.scene.replace_shape(obj_id, fn(original))
-            except g.GeometryError:
-                pass
+        with vp.scene.batched():     # moved together, seen together
+            for obj_id, original in d["originals"].items():
+                if vp.scene.get(obj_id) is None:
+                    continue
+                try:
+                    vp.scene.replace_shape(obj_id, fn(original))
+                except g.GeometryError:
+                    pass
 
     def _extrude_by(self, axis, value):
         """Rebuild what the drag is growing, at the distance it stands at now.

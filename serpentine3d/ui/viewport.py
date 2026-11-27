@@ -1789,6 +1789,8 @@ class Viewport(QOpenGLWidget):
         self._update_gumball_readout()
         self._update_draw_readout()
         self._paint_dots(w, h)
+        from . import attachment_marks
+        attachment_marks.paint(self, w, h)
 
     def _paint_dots(self, w, h):
         """Annotation dots: screen-space label bubbles over their anchors."""

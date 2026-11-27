@@ -601,67 +601,122 @@ def cmd_audit(ctx):
 
 @command("attach")
 def cmd_attach(ctx):
-    """Attach an object to a face, so it follows when the face moves.
+    """Attach an object to a flat face, so it follows when the face moves
+    or turns.
 
-    Ctrl+Shift-click the face it sits on first (a cube's top). Then pick
-    the object, the point it is measured from (a corner, an edge, any
-    point; Enter for the face's centre), and how it keeps its place
-    sideways: the same distance from that point, or the same share of the
-    face. Up and down it rides the face. A link follows its own face only,
-    unless asked to follow a chain too. unattach takes a link away."""
+    Pick the object, then click the face it goes on (it need not be there
+    yet), then the object's own side that sits on the face (Enter for its
+    lowest). It is put down on the face, then measured from two edges of
+    the face: click each edge (Enter for the nearest) and type its distance
+    (Enter keeps where it is). Keep=Share keeps its share of the face
+    instead of the distance. Moving it by hand, or deleting the face's
+    object, ends the link; unattach takes one away."""
+    import numpy as np
     from ..core import attachments as at
-    from .base import PointReq
-    faces = [(oid, i) for oid, kind, i in ctx.selection.subobjects
-             if kind == "face"]
-    if len(faces) != 1:
-        ctx.echo("Ctrl+Shift-click the one face the object sits on first, "
-                 "then run attach.")
-        return
-    parent_id, index = faces[0]
-    parent = ctx.scene.get(parent_id)
-    if parent is None:
-        return
-    face = g.faces_of(parent.shape)[index]
-    picked = yield SelectReq("Select the object to attach to that face",
-                             max_count=1, allow_preselected=False)
+    from .base import LengthReq
+    picked = yield SelectReq("Object to attach", max_count=1)
     follower = picked[0]
-    anchor = yield PointReq("Point it is measured from (Enter for the "
-                            "face's centre)", allow_empty=True,
-                            extra_options=("Centre",))
-    if anchor in (None, "Centre"):
-        anchor, where = None, "the face's centre"
-    else:
-        where = "the picked point"
-    mode = yield OptionReq("Sideways, it keeps its",
-                           options=["Distance", "Proportion"],
-                           default="Distance")
-    chain = yield OptionReq("Also follow when that face is moved by an "
-                            "attachment of its own?", options=["No", "Yes"],
-                            default="No")
+    ctx.pick_points.clear()
+    got = yield SelectReq(
+        f"Face to attach {follower.name} to (click it on its object)",
+        max_count=1, want_point=True, allow_preselected=False,
+        accept=lambda o: o.id != follower.id)
+    parent = got[0]
+    click = ctx.pick_points.get(parent.id)
+    if click is None:                     # typed or scripted: the face
+        lo, hi = g.bbox(follower.shape)   # nearest the object
+        click = tuple((a + b) / 2 for a, b in zip(lo, hi))
     try:
-        link = at.make_link(parent, face, follower, anchor, mode.lower(),
-                            chain == "Yes")
+        face = g.faces_of(parent.shape)[g.face_index_near(parent.shape,
+                                                          click)]
+    except (g.GeometryError, IndexError):
+        ctx.echo("Not attached: no face there. Click the face on its object.")
+        return
+    if not at.is_flat(face):
+        ctx.echo("Not attached: that face is curved. Attach to a flat face.")
+        return
+    n = at.outward_normal(face)
+    ctx.pick_points.clear()
+    side_pick = yield SelectReq(
+        f"Side of {follower.name} that sits on it (click it, Enter for its "
+        "lowest side)", max_count=1, min_count=0, want_point=True,
+        allow_preselected=False, accept=lambda o: o.id == follower.id)
+    side = None
+    point = ctx.pick_points.get(follower.id) if side_pick else None
+    if point is not None:
+        own = g.faces_of(follower.shape)[g.face_index_near(follower.shape,
+                                                           point)]
+        if at.is_flat(own):
+            side = at.outward_normal(own)
+        else:
+            ctx.echo("That side is curved, so it sits on its lowest side.")
+    if side is None:
+        side = at.lowest_side(follower.shape, n)
+
+    def _put(shape):
+        with at.paused(ctx.scene):
+            ctx.scene.replace_shape(follower.id, shape)
+
+    with at.paused(ctx.scene):
+        if at.link_of(follower) is not None:
+            ctx.scene.update(follower.id,
+                             user_text=at.with_link(follower.user_text, None))
+    try:
+        shape, p = at.seat(parent.shape, face, follower.shape, side)
+    except (at.AttachError, g.GeometryError) as exc:
+        ctx.echo(f"Not attached: {exc}.")
+        return
+    _put(shape)
+    dirs = []
+    for k in range(2):
+        ctx.pick_points.clear()
+        got = yield SelectReq(
+            "Edge to measure from (click it, Enter for the nearest)" if k == 0
+            else "Second edge, across the first (click it, Enter for the "
+            "nearest)", max_count=1, min_count=0, want_point=True,
+            allow_preselected=False, accept=lambda o: o.id == parent.id)
+        click = ctx.pick_points.get(parent.id) if got else None
+        across = np.asarray(dirs[0]["m"]) if dirs else None
+        try:
+            m, _edge = at.nearest_edge(face, n, p if click is None else click,
+                                       across=across)
+        except at.AttachError as exc:
+            ctx.echo(f"Not attached: {exc}.")
+            return
+        now = at.face_frame(face, n, [m])["e"][0] - float(m @ p)
+        typed = yield LengthReq(
+            f"Distance from that edge (Enter for {round(now, 4):g})",
+            default=now, choices={"Keep": ["Edge", "Share"]})
+        keep = ctx.opt("Keep", "Edge").lower()
+        # slide square to the first direction, so the first stays put
+        way = m if across is None else m - float(m @ across) * across
+        way = way / np.linalg.norm(way)
+        to = p + way * ((now - float(typed)) / float(way @ m))
+        _put(at.moved(ctx.scene.get(follower.id).shape, np.eye(3), p, to))
+        p = to
+        dirs.append({"m": m.tolist(), "keep": keep})
+    follower = ctx.scene.get(follower.id)
+    try:
+        link = at.make_link(parent, face, follower, -n, dirs)
     except at.AttachError as exc:
         ctx.echo(f"Not attached: {exc}.")
         return
-    ctx.scene.update(follower.id,
-                     user_text=at.with_link(follower.user_text, link))
-    at.watch(ctx.scene)
-    keeps = ("its distance from " + where if mode == "Distance"
-             else "its share of the face")
-    ctx.echo(f"{follower.name} attached to {parent.name}: it rides that "
-             f"face and keeps {keeps}"
-             + (", and follows a chain." if chain == "Yes" else "."))
+    at.watch(ctx.scene, ctx.echo)
+    ctx.scene.update(follower.id, user_text=at.with_link(
+        follower.user_text, link, parent.name))
+    ctx.echo(f"{follower.name} attached to {at.describe(link, parent.name)}"
+             ". Moving it by hand ends the link.")
 
 
 @command("unattach")
 def cmd_unattach(ctx):
     """Take away the attachment of the selected objects."""
     from ..core import attachments as at
+    from ..core import user_text
     objs = yield SelectReq("Select attached objects to unattach")
     done = 0
     for o in objs:
-        if at.link_of(o) is not None:
+        if user_text.value_of(o.user_text, at.KEY):
             ctx.scene.update(o.id, user_text=at.with_link(o.user_text, None))
             done += 1
     ctx.echo(f"Unattached {done} object(s)." if done
