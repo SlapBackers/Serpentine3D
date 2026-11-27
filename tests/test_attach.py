@@ -130,10 +130,10 @@ def test_undo_puts_both_back_and_nothing_moves_twice():
     assert g.bbox(doc.get("Cube").shape)[1][2] == pytest.approx(20, abs=1e-6)
 
 
-def test_detach_stops_it_following():
+def test_unattach_stops_it_following():
     doc, cube = _scene()
     _attach(doc, cube)
-    doc.run("detach", ["Cyl", ""])
+    doc.run("unattach", ["Cyl", ""])
     _resize(doc, "Cube", (0, 0, 0), 40, 30, 35)
     _c, lo, _hi = _centre(doc, "Cyl")
     assert lo[2] == pytest.approx(20, abs=1e-6)

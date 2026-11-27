@@ -608,7 +608,7 @@ def cmd_attach(ctx):
     point; Enter for the face's centre), and how it keeps its place
     sideways: the same distance from that point, or the same share of the
     face. Up and down it rides the face. A link follows its own face only,
-    unless asked to follow a chain too. detach takes a link away."""
+    unless asked to follow a chain too. unattach takes a link away."""
     from ..core import attachments as at
     from .base import PointReq
     faces = [(oid, i) for oid, kind, i in ctx.selection.subobjects
@@ -654,15 +654,15 @@ def cmd_attach(ctx):
              + (", and follows a chain." if chain == "Yes" else "."))
 
 
-@command("detach")
-def cmd_detach(ctx):
+@command("unattach")
+def cmd_unattach(ctx):
     """Take away the attachment of the selected objects."""
     from ..core import attachments as at
-    objs = yield SelectReq("Select attached objects to detach")
+    objs = yield SelectReq("Select attached objects to unattach")
     done = 0
     for o in objs:
         if at.link_of(o) is not None:
             ctx.scene.update(o.id, user_text=at.with_link(o.user_text, None))
             done += 1
-    ctx.echo(f"Detached {done} object(s)." if done
+    ctx.echo(f"Unattached {done} object(s)." if done
              else "None of those is attached.")

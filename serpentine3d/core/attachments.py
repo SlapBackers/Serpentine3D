@@ -2,7 +2,7 @@
 
 A cylinder stands on a cube. The cube is made taller, wider, moved: the
 cylinder should stay on its top face and keep its place there, measured
-the way it was attached. Nothing links by itself; `attach` makes each link,
+the way it was attached. Nothing links by itself; `attach` makes each link (and `unattach` takes one away),
 and says how the object keeps its place sideways:
 
 - "distance": its distance from a point of the face (a corner, the middle
